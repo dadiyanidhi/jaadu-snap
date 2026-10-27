@@ -11,7 +11,7 @@ A Chrome extension that gives your Google Meet calls a plot. 🫰
 
 No green screen, no editing, no virtual-camera app. The effects are drawn into your camera feed, so everyone in the call sees them live. Everything runs on your machine.
 
-![The four effects, captured from Chrome's test camera](docs/effects.png)
+![Dust, cash rain and absolute cinema on Chrome's test camera](docs/effects.png)
 
 ## Install
 

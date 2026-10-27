@@ -5,5 +5,5 @@ cd "$(dirname "$0")/.."
 VERSION=$(node -p "require('./manifest.json').version")
 mkdir -p dist
 rm -f "dist/meet-snap-fx-$VERSION.zip"
-zip -qr "dist/meet-snap-fx-$VERSION.zip" manifest.json src detector popup icons vendor models LICENSE THIRD_PARTY_NOTICES.md
+zip -qr "dist/meet-snap-fx-$VERSION.zip" manifest.json src detector popup icons vendor models LICENSE THIRD_PARTY_NOTICES.md licenses
 echo "dist/meet-snap-fx-$VERSION.zip"
