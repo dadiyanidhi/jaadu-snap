@@ -1,0 +1,12 @@
+{
+  "name": "meet-snap-fx",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Gesture-triggered live effects for Google Meet",
+  "license": "MIT",
+  "scripts": {
+    "test": "node test/gestures.test.mjs",
+    "package": "sh scripts/package.sh",
+    "update-vendor": "sh scripts/update-vendor.sh"
+  }
+}

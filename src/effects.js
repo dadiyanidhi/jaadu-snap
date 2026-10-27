@@ -1,0 +1,380 @@
+// The four effects, drawn straight into the outgoing camera frames.
+// Times passed to effects are seconds since the effect started.
+(() => {
+  const NS = (globalThis.__snapFX ||= {});
+
+  const rand = (a = 0, b = 1) => a + Math.random() * (b - a);
+  const clamp01 = (v) => Math.max(0, Math.min(1, v));
+  const easeOut = (p) => 1 - Math.pow(1 - clamp01(p), 3);
+  const canvas = (w, h) => new OffscreenCanvas(Math.max(1, w), Math.max(1, h));
+
+  // Draws the person mask (or a centered silhouette if segmentation isn't ready).
+  function drawPersonMask(ctx, scene, w, h) {
+    if (scene.hasMask) {
+      ctx.drawImage(scene.mask, 0, 0, w, h);
+      return;
+    }
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.ellipse(w * 0.5, h * 0.62, w * 0.2, h * 0.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Paints the learned empty-room background over wherever the person currently is.
+  function hidePerson(ctx, scene, W, H, alpha) {
+    if (alpha <= 0) return;
+    const { width: pw, height: ph } = scene.plate;
+    const layer = (scene._hideLayer ||= canvas(pw, ph));
+    const l = layer.getContext('2d');
+    l.globalCompositeOperation = 'source-over';
+    l.clearRect(0, 0, pw, ph);
+    l.filter = 'blur(3px)';
+    drawPersonMask(l, scene, pw, ph);
+    l.filter = 'none';
+    l.globalCompositeOperation = 'source-in';
+    l.drawImage(scene.plate, 0, 0);
+    l.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = alpha;
+    ctx.drawImage(layer, 0, 0, W, H);
+    ctx.globalAlpha = 1;
+  }
+
+  // Snap once: the person is frozen and blown away as dust, Endgame style.
+  class DustEffect {
+    static TILE = 6;
+    static DURATION = 6.2;
+
+    start(scene) {
+      const { width: pw, height: ph } = scene.sent;
+      this.pw = pw;
+      this.ph = ph;
+      this.snapshot = canvas(pw, ph);
+      const s = this.snapshot.getContext('2d', { willReadFrequently: true });
+      drawPersonMask(s, scene, pw, ph);
+      s.globalCompositeOperation = 'source-in';
+      s.drawImage(scene.sent, 0, 0, pw, ph);
+
+      const T = DustEffect.TILE;
+      const alpha = s.getImageData(0, 0, pw, ph).data;
+      this.tiles = [];
+      for (let y = 0; y < ph; y += T) {
+        for (let x = 0; x < pw; x += T) {
+          const cx = Math.min(pw - 1, x + (T >> 1)), cy = Math.min(ph - 1, y + (T >> 1));
+          if (alpha[(cy * pw + cx) * 4 + 3] < 100) continue;
+          this.tiles.push({
+            x, y,
+            delay: 0.2 + (x / pw) * 1.1 + (1 - y / ph) * 0.25 + rand(0, 0.9),
+            life: rand(1.4, 2.4),
+            vx: rand(25, 90), vy: rand(-70, -20),
+            ax: rand(20, 70), ay: rand(-40, -5),
+            wobble: rand(6, 18), phase: rand(0, Math.PI * 2),
+          });
+        }
+      }
+    }
+
+    draw(ctx, frame, W, H, t, scene) {
+      const cover = t < 5.2 ? 1 : 1 - (t - 5.2) / 1.0;
+      hidePerson(ctx, scene, W, H, cover);
+
+      const T = DustEffect.TILE;
+      const k = W / this.pw;
+      const ky = H / this.ph;
+      const ash = [[], [], [], []];
+      for (const p of this.tiles) {
+        const age = t - p.delay;
+        if (age < 0) {
+          ctx.drawImage(this.snapshot, p.x, p.y, T, T, p.x * k, p.y * ky, T * k + 0.75, T * ky + 0.75);
+          continue;
+        }
+        if (age > p.life) continue;
+        const q = age / p.life;
+        const dx = p.vx * age + 0.5 * p.ax * age * age + Math.sin(p.phase + age * 4) * p.wobble * age;
+        const dy = p.vy * age + 0.5 * p.ay * age * age;
+        const x = (p.x + dx) * k, y = (p.y + dy) * ky;
+        const size = T * k * (1 - 0.65 * q);
+        if (q < 0.3) {
+          ctx.globalAlpha = 1 - q;
+          ctx.drawImage(this.snapshot, p.x, p.y, T, T, x, y, size, size);
+        } else {
+          ash[Math.min(3, Math.floor((1 - q) * 4 / 0.7))].push(x, y, size * 0.7);
+        }
+      }
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = 'rgb(74, 60, 50)';
+      for (let b = 0; b < 4; b++) {
+        const list = ash[b];
+        if (!list.length) continue;
+        ctx.globalAlpha = 0.2 + b * 0.2;
+        ctx.beginPath();
+        for (let i = 0; i < list.length; i += 3) ctx.rect(list[i], list[i + 1], list[i + 2], list[i + 2]);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+      return t < DustEffect.DURATION;
+    }
+  }
+
+  function makeBill(hueShift) {
+    const w = 220, h = 96;
+    const c = canvas(w, h);
+    const g = c.getContext('2d');
+    const grad = g.createLinearGradient(0, 0, w, h);
+    grad.addColorStop(0, `hsl(${100 + hueShift}, 38%, 62%)`);
+    grad.addColorStop(1, `hsl(${105 + hueShift}, 42%, 42%)`);
+    g.fillStyle = grad;
+    g.beginPath();
+    g.roundRect(0, 0, w, h, 6);
+    g.fill();
+    g.strokeStyle = 'rgba(30, 70, 25, 0.85)';
+    g.lineWidth = 4;
+    g.strokeRect(8, 8, w - 16, h - 16);
+    g.fillStyle = 'rgba(225, 245, 205, 0.9)';
+    g.beginPath();
+    g.ellipse(w / 2, h / 2, 30, 34, 0, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = '#1f4d1a';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.font = 'bold 44px Georgia, serif';
+    g.fillText('$', w / 2, h / 2 + 2);
+    g.font = 'bold 18px Georgia, serif';
+    g.fillText('100', 32, 26);
+    g.fillText('100', w - 32, h - 24);
+    return c;
+  }
+
+  // Snap twice: it rains cash.
+  class CashEffect {
+    static DURATION = 6.5;
+    static sprites = null;
+
+    start(scene, W, H) {
+      CashEffect.sprites ||= [makeBill(0), makeBill(-8), makeBill(10)];
+      this.bills = Array.from({ length: 85 }, () => {
+        const size = W * rand(0.07, 0.13);
+        return {
+          x: rand(-0.05, 1.05) * W,
+          y: -size - rand(0, H * 0.25),
+          delay: rand(0, 3),
+          speed: H * rand(0.22, 0.42),
+          sway: W * rand(0.01, 0.04), swaySpeed: rand(1.2, 3), phase: rand(0, 6.3),
+          rot: rand(0, Math.PI * 2), rotSpeed: rand(-1.6, 1.6),
+          flip: rand(2.5, 7),
+          size,
+          sprite: CashEffect.sprites[Math.floor(rand(0, 3))],
+        };
+      });
+    }
+
+    draw(ctx, frame, W, H, t) {
+      const fade = t > CashEffect.DURATION - 1 ? CashEffect.DURATION - t : 1;
+      for (const b of this.bills) {
+        const age = t - b.delay;
+        if (age < 0) continue;
+        const y = b.y + b.speed * age;
+        if (y > H + b.size) continue;
+        const x = b.x + Math.sin(b.phase + age * b.swaySpeed) * b.sway;
+        const flip = Math.cos(b.phase + age * b.flip);
+        ctx.save();
+        ctx.globalAlpha = clamp01(fade);
+        ctx.translate(x, y);
+        ctx.rotate(b.rot + b.rotSpeed * age);
+        ctx.scale(1, Math.abs(flip) < 0.08 ? 0.08 : flip);
+        if (flip < 0) ctx.filter = 'brightness(0.75)';
+        const h = b.size * (b.sprite.height / b.sprite.width);
+        ctx.drawImage(b.sprite, -b.size / 2, -h / 2, b.size, h);
+        ctx.restore();
+      }
+      return t < CashEffect.DURATION;
+    }
+  }
+
+  // Both hands up: black-and-white, letterbox, film grain, ABSOLUTE CINEMA.
+  class CinemaEffect {
+    static MIN = 4;
+    static grain = null;
+
+    start() {
+      this.until = CinemaEffect.MIN;
+      if (!CinemaEffect.grain) {
+        const c = canvas(256, 256);
+        const g = c.getContext('2d');
+        const img = g.createImageData(256, 256);
+        for (let i = 0; i < img.data.length; i += 4) {
+          const v = Math.random() * 255;
+          img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+          img.data[i + 3] = 255;
+        }
+        g.putImageData(img, 0, 0);
+        CinemaEffect.grain = c;
+      }
+    }
+
+    keepAlive(t) {
+      this.until = Math.max(this.until, t + 1.2);
+    }
+
+    intensity(t) {
+      return Math.min(easeOut(t / 0.5), clamp01((this.until + 0.6 - t) / 0.6));
+    }
+
+    filter(t) {
+      const p = this.intensity(t);
+      return `grayscale(${p}) contrast(${1 + 0.35 * p}) brightness(${1 - 0.06 * p})`;
+    }
+
+    draw(ctx, frame, W, H, t, scene, settings) {
+      const p = this.intensity(t);
+
+      const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, W * 0.7);
+      vg.addColorStop(0, 'rgba(0,0,0,0)');
+      vg.addColorStop(1, `rgba(0,0,0,${0.7 * p})`);
+      ctx.fillStyle = vg;
+      ctx.fillRect(0, 0, W, H);
+
+      const ox = Math.floor(rand(0, 256)), oy = Math.floor(rand(0, 256));
+      ctx.save();
+      ctx.globalAlpha = 0.13 * p;
+      ctx.globalCompositeOperation = 'overlay';
+      ctx.translate(-ox, -oy);
+      ctx.fillStyle = ctx.createPattern(CinemaEffect.grain, 'repeat');
+      ctx.fillRect(0, 0, W + ox, H + oy);
+      ctx.restore();
+
+      const bar = H * 0.11 * p;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, W, bar);
+      ctx.fillRect(0, H - bar, W, bar);
+
+      const textP = clamp01((t - 0.4) / 0.6) * p;
+      if (textP > 0) {
+        const size = Math.round(H * 0.075);
+        ctx.save();
+        ctx.globalAlpha = textP;
+        ctx.font = `600 ${size}px "Times New Roman", Georgia, serif`;
+        ctx.letterSpacing = `${Math.round(size * 0.18)}px`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'alphabetic';
+        ctx.shadowColor = 'rgba(0,0,0,0.85)';
+        ctx.shadowBlur = size * 0.4;
+        ctx.fillStyle = '#fff';
+        ctx.fillText(settings.cinemaText || 'ABSOLUTE CINEMA', W / 2, H - bar - H * 0.06);
+        ctx.restore();
+      }
+      return t < this.until + 0.6;
+    }
+  }
+
+  // Facepalm: dramatic zoom on your face and… someone shows up.
+  class FacepalmEffect {
+    static DURATION = 4.6;
+
+    start(scene) {
+      const f = scene.faceBox;
+      this.cx = f ? f.x + f.w / 2 : 0.5;
+      this.cy = f ? f.y + f.h / 2 : 0.4;
+    }
+
+    draw(ctx, frame, W, H, t, scene, settings, assets) {
+      const D = FacepalmEffect.DURATION;
+      const inP = easeOut(t / 0.5);
+      const outP = clamp01((D - t) / 0.5);
+      const p = Math.min(inP, outP);
+
+      const z = 1 + 0.22 * p;
+      const sw = W / z, sh = H / z;
+      const sx = Math.max(0, Math.min(W - sw, this.cx * W - sw / 2));
+      const sy = Math.max(0, Math.min(H - sh, this.cy * H - sh / 2));
+      ctx.filter = `saturate(${1 - 0.4 * p}) contrast(${1 + 0.1 * p})`;
+      ctx.drawImage(frame, sx, sy, sw, sh, 0, 0, W, H);
+      ctx.filter = 'none';
+
+      const enter = easeOut((t - 0.25) / 0.55);
+      const leave = clamp01((D - 0.15 - t) / 0.45);
+      const show = Math.min(enter, leave);
+      if (show > 0) {
+        const wob = Math.sin(t * 7) * 0.04;
+        if (assets.facepalm) {
+          const img = assets.facepalm;
+          const h = H * 0.62, w = h * (img.width / img.height);
+          ctx.save();
+          ctx.translate(W - w * 0.55 - W * 0.02, H - h * show + h * 0.5);
+          ctx.rotate(wob * 0.5);
+          ctx.drawImage(img, -w / 2, -h / 2, w, h);
+          ctx.restore();
+        } else {
+          const size = H * 0.42;
+          ctx.save();
+          ctx.translate(W - size * 0.6, H + size * 0.55 - size * 1.05 * show);
+          ctx.rotate(wob - 0.12);
+          ctx.font = `${size}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('🤦', 0, 0);
+          ctx.restore();
+        }
+      }
+
+      const capP = clamp01((t - 0.6) / 0.25) * outP;
+      if (capP > 0 && settings.facepalmText) {
+        const size = Math.round(H * 0.1);
+        ctx.save();
+        ctx.globalAlpha = capP;
+        ctx.font = `900 ${size}px Impact, "Arial Black", sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = size * 0.14;
+        ctx.strokeStyle = '#000';
+        ctx.fillStyle = '#fff';
+        const y = H - H * 0.07;
+        ctx.strokeText(settings.facepalmText, W * 0.42, y);
+        ctx.fillText(settings.facepalmText, W * 0.42, y);
+        ctx.restore();
+      }
+      return t < D;
+    }
+  }
+
+  const EFFECTS = { dust: DustEffect, cash: CashEffect, cinema: CinemaEffect, facepalm: FacepalmEffect };
+
+  class FXManager {
+    constructor() {
+      this.active = null;
+      this.assets = { facepalm: null };
+    }
+
+    trigger(name, now, scene, W, H, force = false) {
+      const Cls = EFFECTS[name];
+      if (!Cls) return;
+      if (this.active && !force) {
+        if (this.active.name === 'cinema' && name === 'cinema') this.active.fx.keepAlive(now - this.active.startedAt);
+        return;
+      }
+      const fx = new Cls();
+      fx.start(scene, W, H);
+      this.active = { name, fx, startedAt: now };
+    }
+
+    keepCinema(now) {
+      if (this.active?.name === 'cinema') this.active.fx.keepAlive(now - this.active.startedAt);
+    }
+
+    frameFilter(now) {
+      const a = this.active;
+      return a && a.fx.filter ? a.fx.filter(now - a.startedAt) : 'none';
+    }
+
+    draw(ctx, frame, W, H, now, scene, settings) {
+      const a = this.active;
+      if (!a) return;
+      const alive = a.fx.draw(ctx, frame, W, H, now - a.startedAt, scene, settings, this.assets);
+      ctx.globalAlpha = 1;
+      ctx.filter = 'none';
+      ctx.globalCompositeOperation = 'source-over';
+      if (!alive) this.active = null;
+    }
+  }
+
+  NS.FXManager = FXManager;
+})();
