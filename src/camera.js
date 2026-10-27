@@ -146,23 +146,38 @@
         .pipeTo(gen.writable)
         .catch(() => {});
 
-      const stopGen = gen.stop.bind(gen);
-      gen.stop = () => {
-        track.stop();
-        stopGen();
-        this.dispose();
+      // Meet clones camera tracks and stops the originals, so the real camera
+      // may only stop once the generator and every clone of it have stopped.
+      const live = new Map();
+      const adopt = (t) => {
+        const nativeStop = t.stop.bind(t);
+        const nativeClone = t.clone.bind(t);
+        live.set(t, nativeStop);
+        t.stop = () => {
+          if (!live.delete(t)) return;
+          nativeStop();
+          if (!live.size) {
+            track.stop();
+            this.dispose();
+          }
+        };
+        t.clone = () => adopt(nativeClone());
+        t.getSettings = () => track.getSettings();
+        t.getCapabilities = () => track.getCapabilities();
+        t.getConstraints = () => track.getConstraints();
+        t.applyConstraints = (c) => track.applyConstraints(c);
+        Object.defineProperty(t, 'label', { get: () => track.label });
+        return t;
       };
-      gen.getSettings = () => track.getSettings();
-      gen.getCapabilities = () => track.getCapabilities();
-      gen.getConstraints = () => track.getConstraints();
-      gen.applyConstraints = (c) => track.applyConstraints(c);
-      Object.defineProperty(gen, 'label', { get: () => track.label });
       track.addEventListener('ended', () => {
-        stopGen();
-        gen.dispatchEvent(new Event('ended'));
+        for (const [t, nativeStop] of live) {
+          nativeStop();
+          t.dispatchEvent(new Event('ended'));
+        }
+        live.clear();
         this.dispose();
       });
-      this.out = gen;
+      this.out = adopt(gen);
 
       pipelines.add(this);
       active = this;
