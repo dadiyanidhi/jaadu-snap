@@ -19,7 +19,7 @@
   <section>
     <h2>Gestures</h2>
     <div class="row">
-      <label><input type="checkbox" data-key="snap"> Snap once → turn to dust</label>
+      <label><input type="checkbox" data-key="snap"> Snap → vanish into dust, snap again to return</label>
       <button data-trigger="dust">Test</button>
     </div>
     <div class="row">
@@ -34,19 +34,20 @@
       <label><input type="checkbox" data-key="facepalm"> Facepalm → guess who</label>
       <button data-trigger="facepalm">Test</button>
     </div>
+    <label><input type="checkbox" data-key="snapSound"> Use snap sound to confirm (recommended)</label>
     <label class="slider">Snap sensitivity
       <input type="range" min="0" max="1" step="0.05" data-key="sensitivity">
     </label>
-    <p class="hint">Shortcuts in Meet: Alt+Shift+1 dust, 2 cash, 3 cinema, 4 facepalm.</p>
+    <p class="hint">Shortcuts in Meet: Alt+Shift+1 vanish/return, 2 cash, 3 cinema, 4 facepalm.</p>
   </section>
 
   <section>
-    <h2>Background (for the dust effect)</h2>
+    <h2>Room (for vanishing)</h2>
     <div class="buttons">
+      <button data-background="reset" title="Use after moving the camera">Relearn room</button>
       <button data-background="capture" title="Step out of frame within 3 seconds">Capture empty room</button>
-      <button data-background="reset">Reset</button>
     </div>
-    <p class="hint">Click capture, then step out of frame for ~5 seconds so the room behind you looks real when you vanish.</p>
+    <p class="hint">The room behind you is learned and filled in automatically. Moved the camera? Click Relearn. For a perfect result, click Capture and step out of frame for ~5 seconds.</p>
   </section>
 
   <section>

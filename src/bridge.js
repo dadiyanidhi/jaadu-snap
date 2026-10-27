@@ -7,6 +7,7 @@
     doubleSnap: true,
     cinema: true,
     facepalm: true,
+    snapSound: true,
     sensitivity: 0.5,
     showDebug: false,
     cinemaText: 'ABSOLUTE CINEMA',

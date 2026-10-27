@@ -4,6 +4,7 @@ const DEFAULTS = {
   doubleSnap: true,
   cinema: true,
   facepalm: true,
+  snapSound: true,
   sensitivity: 0.5,
   showDebug: false,
   cinemaText: 'ABSOLUTE CINEMA',
@@ -41,7 +42,12 @@ async function refreshStatus() {
   else if (!s.hooked) setStatus('Waiting for your camera to turn on…');
   else if (s.detector === 'error') setStatus(`Detector failed: ${s.error}`, 'err');
   else if (s.detector !== 'ready') setStatus('Camera hooked. Loading hand tracking…');
-  else setStatus(`Ready. Hand tracking on ${s.backend}.`, 'ok');
+  else if (s.room === 'learning') setStatus('Learning your room… keep the camera still for a few seconds.');
+  else {
+    const room = s.room === 'unavailable' ? 'Room fill unavailable, using blur.' : 'Room learned.';
+    const sound = s.sound === 'on' ? 'Snap sound on.' : 'Snap sound off (camera only).';
+    setStatus(`Ready. ${room} ${sound}`, 'ok');
+  }
 }
 
 function setStatus(text, kind = '') {

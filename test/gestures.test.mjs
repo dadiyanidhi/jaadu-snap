@@ -74,4 +74,57 @@ function run(engine, seq) {
   const far = H(hand({ wx: 0.15, wy: 0.9, pose: 'open' }));
   assert.deepEqual(run(e, [[0, [], [face]], [100, [far]], [800, [far]]]), [], 'hand away from face is not a facepalm');
 }
+{
+  const e = new GestureEngine();
+  e.useSound = true;
+  const ev = [];
+  ev.push(...e.update(0, [H(hand({ pose: 'pinch' }))], [], ASPECT));
+  ev.push(...e.update(80, [H(hand({ pose: 'open' }))], [], ASPECT));
+  ev.push(...e.onClick(150));
+  ev.push(...e.tick(1000));
+  assert.deepEqual(ev, ['snap'], 'click right after a pinch release is a snap');
+}
+{
+  const e = new GestureEngine();
+  e.useSound = true;
+  const ev = [];
+  ev.push(...e.onClick(0));
+  ev.push(...e.update(20, [H(hand({ pose: 'pinch' }))], [], ASPECT));
+  ev.push(...e.update(90, [], [], ASPECT));
+  ev.push(...e.tick(1000));
+  assert.deepEqual(ev, ['snap'], 'click first, then the hand blurs out mid-pinch, is a snap');
+}
+{
+  const e = new GestureEngine();
+  e.useSound = true;
+  const pen = H(hand({ pose: 'pinch' }));
+  const ev = [];
+  for (let t = 0; t <= 3000; t += 100) {
+    ev.push(...e.update(t, [pen], [], ASPECT));
+    if (t % 1000 === 500) ev.push(...e.onClick(t));
+  }
+  ev.push(...e.tick(4000));
+  assert.deepEqual(ev, [], 'holding a pen pinched while something beeps is not a snap');
+}
+{
+  const e = new GestureEngine();
+  e.useSound = true;
+  const ev = [];
+  ev.push(...e.update(0, [H(hand({ pose: 'pinch' }))], [], ASPECT));
+  ev.push(...e.update(80, [H(hand({ pose: 'open' }))], [], ASPECT));
+  ev.push(...e.onClick(1200));
+  assert.deepEqual(ev, [], 'a click long after the release is not a snap');
+}
+{
+  const e = new GestureEngine();
+  e.useSound = true;
+  const ev = [];
+  for (const t0 of [0, 400]) {
+    ev.push(...e.update(t0, [H(hand({ pose: 'pinch' }))], [], ASPECT));
+    ev.push(...e.update(t0 + 80, [H(hand({ pose: 'snapped' }))], [], ASPECT));
+    ev.push(...e.onClick(t0 + 100));
+  }
+  ev.push(...e.tick(2000));
+  assert.deepEqual(ev, ['doubleSnap'], 'two sound-confirmed snaps make a double snap');
+}
 console.log('gesture tests passed');

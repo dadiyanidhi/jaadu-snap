@@ -8,41 +8,34 @@
   const easeOut = (p) => 1 - Math.pow(1 - clamp01(p), 3);
   const canvas = (w, h) => new OffscreenCanvas(Math.max(1, w), Math.max(1, h));
 
-  // Draws the person mask (or a centered silhouette if segmentation isn't ready).
-  function drawPersonMask(ctx, scene, w, h) {
-    if (scene.hasMask) {
-      ctx.drawImage(scene.mask, 0, 0, w, h);
-      return;
-    }
-    ctx.fillStyle = '#fff';
-    ctx.beginPath();
-    ctx.ellipse(w * 0.5, h * 0.62, w * 0.2, h * 0.5, 0, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  // Paints the learned empty-room background over wherever the person currently is.
+  // Paints the learned empty room over wherever the person currently is.
   function hidePerson(ctx, scene, W, H, alpha) {
     if (alpha <= 0) return;
-    const { width: pw, height: ph } = scene.plate;
+    const { width: pw, height: ph } = scene.room;
     const layer = (scene._hideLayer ||= canvas(pw, ph));
     const l = layer.getContext('2d');
     l.globalCompositeOperation = 'source-over';
     l.clearRect(0, 0, pw, ph);
-    l.filter = 'blur(3px)';
-    drawPersonMask(l, scene, pw, ph);
+    l.filter = 'blur(2px)';
+    l.drawImage(scene.mask, 0, 0, pw, ph);
     l.filter = 'none';
     l.globalCompositeOperation = 'source-in';
-    l.drawImage(scene.plate, 0, 0);
+    l.drawImage(scene.room, 0, 0);
     l.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = alpha;
     ctx.drawImage(layer, 0, 0, W, H);
     ctx.globalAlpha = 1;
   }
 
-  // Snap once: the person is frozen and blown away as dust, Endgame style.
+  // Snap: the person is frozen and blown away as dust, Endgame style, and
+  // stays gone until the next snap brings the dust back together.
   class DustEffect {
     static TILE = 6;
-    static DURATION = 6.2;
+    static FADE_BACK = 0.5;
+
+    static canStart(scene) {
+      return scene.hasMask;
+    }
 
     start(scene) {
       const { width: pw, height: ph } = scene.sent;
@@ -50,49 +43,87 @@
       this.ph = ph;
       this.snapshot = canvas(pw, ph);
       const s = this.snapshot.getContext('2d', { willReadFrequently: true });
-      drawPersonMask(s, scene, pw, ph);
+      s.drawImage(scene.mask, 0, 0, pw, ph);
       s.globalCompositeOperation = 'source-in';
       s.drawImage(scene.sent, 0, 0, pw, ph);
 
       const T = DustEffect.TILE;
       const alpha = s.getImageData(0, 0, pw, ph).data;
       this.tiles = [];
+      this.vanishEnd = 0;
       for (let y = 0; y < ph; y += T) {
         for (let x = 0; x < pw; x += T) {
           const cx = Math.min(pw - 1, x + (T >> 1)), cy = Math.min(ph - 1, y + (T >> 1));
           if (alpha[(cy * pw + cx) * 4 + 3] < 100) continue;
-          this.tiles.push({
+          const tile = {
             x, y,
-            delay: 0.2 + (x / pw) * 1.1 + (1 - y / ph) * 0.25 + rand(0, 0.9),
+            delay: 0.15 + (x / pw) * 1.1 + (1 - y / ph) * 0.25 + rand(0, 0.9),
             life: rand(1.4, 2.4),
             vx: rand(25, 90), vy: rand(-70, -20),
             ax: rand(20, 70), ay: rand(-40, -5),
             wobble: rand(6, 18), phase: rand(0, Math.PI * 2),
-          });
+            back: 0.1 + (1 - x / pw) * 0.5 + rand(0, 0.5),
+          };
+          this.vanishEnd = Math.max(this.vanishEnd, tile.delay + tile.life);
+          this.tiles.push(tile);
         }
       }
+      this.returnAt = null;
+    }
+
+    reappear(t) {
+      if (this.returnAt !== null) return;
+      this.returnAt = Math.max(t, this.vanishEnd);
+      this.returnEnd = 0;
+      for (const p of this.tiles) this.returnEnd = Math.max(this.returnEnd, p.back + p.life * 0.55);
+    }
+
+    offset(p, age) {
+      return [
+        p.vx * age + 0.5 * p.ax * age * age + Math.sin(p.phase + age * 4) * p.wobble * age,
+        p.vy * age + 0.5 * p.ay * age * age,
+      ];
     }
 
     draw(ctx, frame, W, H, t, scene) {
-      const cover = t < 5.2 ? 1 : 1 - (t - 5.2) / 1.0;
-      hidePerson(ctx, scene, W, H, cover);
-
       const T = DustEffect.TILE;
-      const k = W / this.pw;
-      const ky = H / this.ph;
+      const kx = W / this.pw, ky = H / this.ph;
+      const returning = this.returnAt !== null && t >= this.returnAt;
+      const tr = returning ? t - this.returnAt : 0;
+      const fade = returning ? clamp01((tr - this.returnEnd) / DustEffect.FADE_BACK) : 0;
+      if (fade >= 1) return false;
+
+      hidePerson(ctx, scene, W, H, 1 - fade);
+
       const ash = [[], [], [], []];
       for (const p of this.tiles) {
+        if (returning) {
+          const life = p.life * 0.55;
+          const left = life - (tr - p.back);
+          if (left >= life) continue;
+          if (left <= 0) {
+            ctx.globalAlpha = 1 - fade;
+            ctx.drawImage(this.snapshot, p.x, p.y, T, T, p.x * kx, p.y * ky, T * kx + 0.75, T * ky + 0.75);
+            continue;
+          }
+          const q = left / life;
+          const [dx, dy] = this.offset(p, q * p.life);
+          ctx.globalAlpha = 1 - q;
+          const size = T * kx * (1 - 0.5 * q);
+          ctx.drawImage(this.snapshot, p.x, p.y, T, T, (p.x + dx) * kx, (p.y + dy) * ky, size, size);
+          continue;
+        }
+
         const age = t - p.delay;
         if (age < 0) {
-          ctx.drawImage(this.snapshot, p.x, p.y, T, T, p.x * k, p.y * ky, T * k + 0.75, T * ky + 0.75);
+          ctx.drawImage(this.snapshot, p.x, p.y, T, T, p.x * kx, p.y * ky, T * kx + 0.75, T * ky + 0.75);
           continue;
         }
         if (age > p.life) continue;
         const q = age / p.life;
-        const dx = p.vx * age + 0.5 * p.ax * age * age + Math.sin(p.phase + age * 4) * p.wobble * age;
-        const dy = p.vy * age + 0.5 * p.ay * age * age;
-        const x = (p.x + dx) * k, y = (p.y + dy) * ky;
-        const size = T * k * (1 - 0.65 * q);
+        const [dx, dy] = this.offset(p, age);
+        const x = (p.x + dx) * kx, y = (p.y + dy) * ky;
+        const size = T * kx * (1 - 0.65 * q);
         if (q < 0.3) {
           ctx.globalAlpha = 1 - q;
           ctx.drawImage(this.snapshot, p.x, p.y, T, T, x, y, size, size);
@@ -111,7 +142,7 @@
         ctx.fill();
       }
       ctx.globalAlpha = 1;
-      return t < DustEffect.DURATION;
+      return true;
     }
   }
 
@@ -149,16 +180,16 @@
     static DURATION = 6.5;
     static sprites = null;
 
-    start(scene, W, H) {
+    start() {
       CashEffect.sprites ||= [makeBill(0), makeBill(-8), makeBill(10)];
       this.bills = Array.from({ length: 85 }, () => {
-        const size = W * rand(0.07, 0.13);
+        const size = rand(0.07, 0.13);
         return {
-          x: rand(-0.05, 1.05) * W,
-          y: -size - rand(0, H * 0.25),
+          x: rand(-0.05, 1.05),
+          y: -rand(0, 0.25),
           delay: rand(0, 3),
-          speed: H * rand(0.22, 0.42),
-          sway: W * rand(0.01, 0.04), swaySpeed: rand(1.2, 3), phase: rand(0, 6.3),
+          speed: rand(0.22, 0.42),
+          sway: rand(0.01, 0.04), swaySpeed: rand(1.2, 3), phase: rand(0, 6.3),
           rot: rand(0, Math.PI * 2), rotSpeed: rand(-1.6, 1.6),
           flip: rand(2.5, 7),
           size,
@@ -172,9 +203,10 @@
       for (const b of this.bills) {
         const age = t - b.delay;
         if (age < 0) continue;
-        const y = b.y + b.speed * age;
-        if (y > H + b.size) continue;
-        const x = b.x + Math.sin(b.phase + age * b.swaySpeed) * b.sway;
+        const size = b.size * W;
+        const y = b.y * H - size + b.speed * H * age;
+        if (y > H + size) continue;
+        const x = (b.x + Math.sin(b.phase + age * b.swaySpeed) * b.sway) * W;
         const flip = Math.cos(b.phase + age * b.flip);
         ctx.save();
         ctx.globalAlpha = clamp01(fade);
@@ -182,8 +214,8 @@
         ctx.rotate(b.rot + b.rotSpeed * age);
         ctx.scale(1, Math.abs(flip) < 0.08 ? 0.08 : flip);
         if (flip < 0) ctx.filter = 'brightness(0.75)';
-        const h = b.size * (b.sprite.height / b.sprite.width);
-        ctx.drawImage(b.sprite, -b.size / 2, -h / 2, b.size, h);
+        const h = size * (b.sprite.height / b.sprite.width);
+        ctx.drawImage(b.sprite, -size / 2, -h / 2, size, h);
         ctx.restore();
       }
       return t < CashEffect.DURATION;
@@ -344,16 +376,24 @@
       this.assets = { facepalm: null };
     }
 
-    trigger(name, now, scene, W, H, force = false) {
+    // Returns false if the effect couldn't start (e.g. no person mask yet).
+    trigger(name, now, scene, force = false) {
       const Cls = EFFECTS[name];
-      if (!Cls) return;
-      if (this.active && !force) {
-        if (this.active.name === 'cinema' && name === 'cinema') this.active.fx.keepAlive(now - this.active.startedAt);
-        return;
+      if (!Cls) return false;
+      const a = this.active;
+      if (a?.name === 'dust' && name === 'dust') {
+        a.fx.reappear(now - a.startedAt);
+        return true;
       }
+      if (a && !force) {
+        if (a.name === 'cinema' && name === 'cinema') a.fx.keepAlive(now - a.startedAt);
+        return false;
+      }
+      if (Cls.canStart && !Cls.canStart(scene)) return false;
       const fx = new Cls();
-      fx.start(scene, W, H);
+      fx.start(scene);
       this.active = { name, fx, startedAt: now };
+      return true;
     }
 
     keepCinema(now) {

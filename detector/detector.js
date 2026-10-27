@@ -36,7 +36,7 @@ async function createAll(delegate) {
       outputCategoryMask: false,
     }, delegate),
     create(FaceDetector, '../models/blaze_face_short_range.tflite', {
-      minDetectionConfidence: 0.5,
+      minDetectionConfidence: 0.65,
     }, delegate),
   ]);
 }
@@ -95,6 +95,20 @@ function detect(msg) {
   reply(out, transfer);
 }
 
+let inpaintWorker = null;
+
+function inpaint(msg) {
+  if (!inpaintWorker) {
+    inpaintWorker = new Worker(url('inpaint-worker.js'), { type: 'module' });
+    inpaintWorker.onmessage = (e) => {
+      const m = e.data;
+      reply({ type: 'inpainted', ...m }, m.data ? [m.data] : []);
+    };
+    inpaintWorker.onerror = (e) => reply({ type: 'inpainted', id: msg.id, error: e.message || 'inpaint worker failed' });
+  }
+  inpaintWorker.postMessage(msg, [msg.data]);
+}
+
 async function init() {
   if (!location.ancestorOrigins?.length || location.ancestorOrigins[0] !== PARENT_ORIGIN) return;
   try {
@@ -112,7 +126,12 @@ async function init() {
   }
 
   window.addEventListener('message', (e) => {
-    if (e.origin !== PARENT_ORIGIN || e.source !== parent || e.data?.type !== 'detect') return;
+    if (e.origin !== PARENT_ORIGIN || e.source !== parent) return;
+    if (e.data?.type === 'inpaint') {
+      inpaint(e.data);
+      return;
+    }
+    if (e.data?.type !== 'detect') return;
     try {
       detect(e.data);
     } catch (err) {
