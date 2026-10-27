@@ -41,22 +41,43 @@ async function createAll(delegate) {
   ]);
 }
 
-// Binary person mask, dilated so the cut-out fully covers the person's edges.
-function toMask(conf, w, h) {
-  let a = new Uint8Array(w * h);
-  for (let i = 0; i < a.length; i++) a[i] = conf[i] > 0.25 ? 255 : 0;
-  for (let pass = 0; pass < 3; pass++) {
-    const b = new Uint8Array(a.length);
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const i = y * w + x;
-        b[i] = a[i] || (x > 0 && a[i - 1]) || (x < w - 1 && a[i + 1])
-          || (y > 0 && a[i - w]) || (y < h - 1 && a[i + w]) ? 255 : 0;
-      }
+const WIDE_MARGIN = 0.045;
+
+// Grows a 0/255 mask by r pixels in every direction (square box, via running sums).
+function dilate(src, w, h, r) {
+  const rows = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    let count = 0;
+    for (let x = -r; x < w + r; x++) {
+      if (x + r < w && src[y * w + x + r]) count++;
+      if (x - r - 1 >= 0 && src[y * w + x - r - 1]) count--;
+      if (x >= 0 && x < w) rows[y * w + x] = count > 0 ? 255 : 0;
     }
-    a = b;
   }
-  return a;
+  const out = new Uint8Array(w * h);
+  for (let x = 0; x < w; x++) {
+    let count = 0;
+    for (let y = -r; y < h + r; y++) {
+      if (y + r < h && rows[(y + r) * w + x]) count++;
+      if (y - r - 1 >= 0 && rows[(y - r - 1) * w + x]) count--;
+      if (y >= 0 && y < h) out[y * w + x] = count > 0 ? 255 : 0;
+    }
+  }
+  return out;
+}
+
+// Two person masks: a snug one for cutting the person out of a frame, and a
+// wide one (generous margin, low threshold) that marks where pixels can't be
+// trusted as room. Light clothes against a light wall get low confidence, so
+// the wide mask errs heavily towards "person".
+function toMasks(conf, w, h) {
+  const snug = new Uint8Array(w * h);
+  const loose = new Uint8Array(w * h);
+  for (let i = 0; i < snug.length; i++) {
+    snug[i] = conf[i] > 0.25 ? 255 : 0;
+    loose[i] = conf[i] > 0.12 ? 255 : 0;
+  }
+  return { mask: dilate(snug, w, h, 2), wide: dilate(loose, w, h, Math.round(w * WIDE_MARGIN)) };
 }
 
 function detect(msg) {
@@ -86,9 +107,9 @@ function detect(msg) {
     segmenter.segmentForVideo(image, ts, (result) => {
       const m = result.confidenceMasks?.[0];
       if (!m) return;
-      const mask = toMask(m.getAsFloat32Array(), m.width, m.height);
-      out.mask = { width: m.width, height: m.height, data: mask.buffer };
-      transfer.push(mask.buffer);
+      const { mask, wide } = toMasks(m.getAsFloat32Array(), m.width, m.height);
+      out.mask = { width: m.width, height: m.height, data: mask.buffer, wide: wide.buffer };
+      transfer.push(mask.buffer, wide.buffer);
     });
   }
 

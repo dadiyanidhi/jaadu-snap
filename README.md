@@ -41,10 +41,11 @@ The mic audio is analysed on your computer for loudness spikes and never recorde
 
 ### The empty room
 
-When you vanish, the extension paints the room behind you over where you are. It builds that picture from what the camera sees around you while you move, and fills in what it has never seen (the chair right behind you) with [MI-GAN](https://github.com/Picsart-AI-Research/MI-GAN), an AI inpainting model running locally.
+When you vanish, the extension paints the room behind you over where you are. It builds that picture from what the camera sees around you, keeping a safe margin from your outline so no part of you ends up in it. The part it has never seen (right behind you) is filled with a smooth blend of the surrounding wall plus matching grain, and [MI-GAN](https://github.com/Picsart-AI-Research/MI-GAN), an AI inpainting model running locally, continues textures in from the edges.
 
+- On a plain wall this looks like you were never there. In a busy room (shelves, posters), the spot behind you comes out soft and blurry, because nothing can know what's there.
+- For a perfect result in any room, click **Capture empty room** and step out of frame for about 5 seconds.
 - **Keep the camera still.** If you move it, click **Relearn room**.
-- For a perfect result, click **Capture empty room** and step out of frame for about 5 seconds.
 
 ### Customize
 

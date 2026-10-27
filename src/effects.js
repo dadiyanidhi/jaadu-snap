@@ -16,8 +16,10 @@
     const l = layer.getContext('2d');
     l.globalCompositeOperation = 'source-over';
     l.clearRect(0, 0, pw, ph);
-    l.filter = 'blur(2px)';
-    l.drawImage(scene.mask, 0, 0, pw, ph);
+    // The wide mask leaves a margin of real wall around the person, so a soft
+    // edge there blends into the live frame without showing a seam.
+    l.filter = `blur(${Math.round(pw * 0.012)}px)`;
+    l.drawImage(scene.wide, 0, 0, pw, ph);
     l.filter = 'none';
     l.globalCompositeOperation = 'source-in';
     l.drawImage(scene.room, 0, 0);

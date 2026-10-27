@@ -57,6 +57,7 @@
       pendingSent: canvas(SCENE_W, sh),
       detect: canvas(DETECT_W, Math.round(DETECT_W / aspect)),
       mask: canvas(DETECT_W, Math.round(DETECT_W / aspect)),
+      wide: canvas(DETECT_W, Math.round(DETECT_W / aspect)),
       hasMask: false,
       plate: canvas(SCENE_W, sh),
       cutout: canvas(SCENE_W, sh),
@@ -75,18 +76,23 @@
     return scene;
   }
 
-  function onMask(res, now) {
-    const s = scene;
-    const { width: mw, height: mh, data } = res.mask;
-    const alpha = new Uint8Array(data);
-    const img = new ImageData(mw, mh);
+  function maskCanvas(target, alpha, w, h) {
+    const img = new ImageData(w, h);
     for (let i = 0; i < alpha.length; i++) {
       const o = i * 4;
       img.data[o] = img.data[o + 1] = img.data[o + 2] = 255;
       img.data[o + 3] = alpha[i];
     }
-    if (s.mask.width !== mw || s.mask.height !== mh) s.mask = canvas(mw, mh);
-    s.mask.getContext('2d').putImageData(img, 0, 0);
+    const c = target.width === w && target.height === h ? target : canvas(w, h);
+    c.getContext('2d').putImageData(img, 0, 0);
+    return c;
+  }
+
+  function onMask(res, now) {
+    const s = scene;
+    const { width: mw, height: mh, data, wide } = res.mask;
+    s.mask = maskCanvas(s.mask, new Uint8Array(data), mw, mh);
+    s.wide = maskCanvas(s.wide, new Uint8Array(wide), mw, mh);
     if (!s.hasMask) s.learnStart = now;
     s.hasMask = true;
     const sent = s.sent.getContext('2d');
@@ -111,7 +117,7 @@
       c.clearRect(0, 0, pw, ph);
       c.drawImage(s.sent, 0, 0);
       c.globalCompositeOperation = 'destination-out';
-      c.drawImage(s.mask, 0, 0, pw, ph);
+      c.drawImage(s.wide, 0, 0, pw, ph);
       c.globalCompositeOperation = 'source-over';
       p.globalAlpha = 0.5;
       p.drawImage(s.cutout, 0, 0);
