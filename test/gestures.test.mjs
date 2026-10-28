@@ -99,7 +99,7 @@ function run(engine, seq) {
   ev.push(...e.update(20, [H(hand({ pose: 'pinch' }))], [], ASPECT));
   ev.push(...e.update(90, [], [], ASPECT));
   ev.push(...e.tick(1000));
-  assert.deepEqual(ev, [], 'a pinched hand leaving the view while there is a noise is not a snap');
+  assert.deepEqual(ev, ['snap'], 'click first, then the hand blurs out mid-pinch, is a snap');
 }
 {
   const e = settled(new GestureEngine());

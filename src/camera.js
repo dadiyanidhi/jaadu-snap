@@ -302,9 +302,9 @@
       this.starting = true;
       try {
         // Never be the reason a site asks for the mic: only listen where the
-        // call already has mic access.
-        const mic = await navigator.permissions.query({ name: 'microphone' }).catch(() => null);
-        if (mic?.state !== 'granted') {
+        // call already uses the mic or has permission for it.
+        const mic = sawAudio ? null : await navigator.permissions.query({ name: 'microphone' }).catch(() => null);
+        if (!sawAudio && mic?.state !== 'granted') {
           setStatus({ sound: 'unavailable' });
           return;
         }
@@ -433,6 +433,7 @@
   // ---- Per-track pipeline.
 
   let lastAudioDevice = null;
+  let sawAudio = false;
 
   class Pipeline {
     constructor(track) {
@@ -548,7 +549,8 @@
       const { peak, floor } = sound.lastLevel;
       lines.push(`mic peak ${peak.toFixed(3)} floor ${floor.toFixed(4)} | last click ${((performance.now() - sound.lastClick) / 1000).toFixed(1)}s ago`);
     }
-    for (const d of gestures.debug) lines.push(`${d.key}: pinch ${d.pinch.toFixed(2)} curl ${d.curl.toFixed(2)}`);
+    for (const d of gestures.debug) lines.push(`${d.key}: pinch ${d.pinch.toFixed(2)} curl ${d.curl.toFixed(2)}${d.touching ? ' ARMED' : ''}`);
+    if (gestures.lastVerdict) lines.push(`last: ${gestures.lastVerdict}`);
     lines.forEach((line, i) => ctx.fillText(line, 10, H * 0.05 + i * H * 0.04));
     ctx.restore();
   }
@@ -557,7 +559,10 @@
     const stream = await originalGUM.call(this, constraints);
     const [video] = stream.getVideoTracks();
     const [audio] = stream.getAudioTracks();
-    if (audio) lastAudioDevice = audio.getSettings().deviceId || lastAudioDevice;
+    if (audio) {
+      sawAudio = true;
+      lastAudioDevice = audio.getSettings().deviceId || lastAudioDevice;
+    }
     if (!constraints?.video || !video) {
       // The call may get mic access after the camera is already running.
       if (audio && pipelines.size) sound.start(lastAudioDevice);

@@ -49,6 +49,8 @@
       this.facepalmFired = false;
       this.lastFace = null;
       this.debug = [];
+      // Why the last snap attempt did or didn't count, for the debug overlay.
+      this.lastVerdict = '';
     }
 
     // Called on every detection result. Returns gesture events.
@@ -98,9 +100,14 @@
           st.touchCurl = curl;
         } else if (st.touching && (pinch > releaseMin || slammed)) {
           // After a real snap the middle finger lands in the palm; opening the
-          // hand instead leaves it pointing up.
-          if (now - st.touchAt >= touchWindow || curl >= curlMax) {
+          // hand instead leaves it pointing up. With sound confirming, motion
+          // blur gets more slack and only a clearly open hand is rejected.
+          const maxCurl = this.useSound ? curlMax + 0.35 : curlMax;
+          if (now - st.touchAt >= touchWindow || curl >= maxCurl) {
             st.touching = false;
+            this.lastVerdict = curl >= maxCurl
+              ? `release ignored: finger not in palm (curl ${curl.toFixed(2)})`
+              : `release ignored: too slow (${Math.round(now - st.touchAt)} ms)`;
             continue;
           }
           if (slammed) {
@@ -116,9 +123,13 @@
       }
       for (const [key, st] of this.hands) {
         if (seen.has(key)) continue;
-        // A snapping hand often blurs out of detection for a few frames. It
-        // stays armed and is judged by its pose when it comes back, since a
-        // hand simply leaving the frame looks the same while it's gone.
+        // A snapping hand often blurs out of detection mid-snap. Only a hand
+        // that has been in view a while gets here armed, and it still needs a
+        // click from the mic at the same moment.
+        if (this.useSound && st.touching && now - st.touchAt < touchWindow) {
+          st.touching = false;
+          this.onRelease(st.touchAt, events);
+        }
         if (now - st.seenAt > 1000) this.hands.delete(key);
       }
 
@@ -151,14 +162,24 @@
 
     onRelease(at, events) {
       this.releaseAt = at;
-      this.matchSnap(at, events);
+      if (!this.matchSnap(at, events)) this.lastVerdict = 'hand snapped, waiting for click';
     }
 
     matchSnap(now, events) {
-      if (Math.abs(this.clickAt - this.releaseAt) > SOUND_SYNC_MS) return;
-      if (Math.min(this.clickAt, this.releaseAt) - this.lastSnapAt < 250) return;
+      const gap = this.clickAt - this.releaseAt;
+      if (Math.abs(gap) > SOUND_SYNC_MS) {
+        if (now === this.clickAt) {
+          this.lastVerdict = Number.isFinite(gap)
+            ? `click ignored: hand snap seen ${Math.round(gap)} ms earlier`
+            : 'click ignored: no hand snap seen yet';
+        }
+        return false;
+      }
+      if (Math.min(this.clickAt, this.releaseAt) - this.lastSnapAt < 250) return true;
       this.lastSnapAt = Math.max(this.clickAt, this.releaseAt);
+      this.lastVerdict = `SNAP (click ${Math.round(gap)} ms after hand)`;
       this.onSnap(now, events);
+      return true;
     }
 
     onSnap(now, events) {
