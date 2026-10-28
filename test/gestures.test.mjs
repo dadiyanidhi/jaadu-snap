@@ -14,8 +14,7 @@ function hand({ wx = 0.5, wy = 0.7, s = 0.12, pose }) {
   const fingers = { 8: [-0.35, 6], 12: [0, 10], 16: [0.3, 14], 20: [0.55, 18] };
   for (const [tip, [x, pip]] of Object.entries(fingers)) {
     at(pip, x, -1.4);
-    const folded = pose === 'fist' || ((pose === 'pinch' || pose === 'snapped') && +tip >= 16);
-    at(+tip, x, folded ? -0.9 : -1.95);
+    at(+tip, x, pose === 'fist' ? -0.9 : -1.95);
   }
   at(4, -0.7, -0.6);
   if (pose === 'pinch') { at(12, -0.3, -1.1); at(4, -0.32, -1.1); }
@@ -169,14 +168,32 @@ function run(engine, seq) {
 {
   const e = settled(new GestureEngine());
   e.useSound = true;
-  const loose = hand({ pose: 'pinch' });
-  loose[16] = hand({ pose: 'open' })[16];
-  loose[20] = hand({ pose: 'open' })[20];
+  // Real trace: curl drops from ~1.45 to ~0.7 while thumb and finger still read as touching.
+  const blurred = hand({ pose: 'pinch' });
+  const [wx, wy] = blurred[0];
+  blurred[12] = [wx, wy - 0.5 * 0.12];
+  blurred[4] = [wx - (0.08 * 0.12) / ASPECT, wy - 0.55 * 0.12];
   const ev = [];
-  ev.push(...e.update(0, [H(loose)], [], ASPECT));
-  ev.push(...e.update(80, [H(hand({ pose: 'snapped' }))], [], ASPECT));
-  ev.push(...e.onClick(100));
+  ev.push(...e.update(0, [H(hand({ pose: 'pinch' }))], [], ASPECT));
+  ev.push(...e.update(70, [H(blurred)], [], ASPECT));
+  ev.push(...e.onClick(90));
+  ev.push(...e.update(120, [H(blurred)], [], ASPECT));
   ev.push(...e.tick(1500));
-  assert.deepEqual(ev, [], 'thumb touching the middle finger with ring and pinky out is not a snap pose');
+  assert.deepEqual(ev, ['snap'], 'middle finger slamming into the palm counts even if the thumb still looks pinched');
+}
+{
+  const e = settled(new GestureEngine());
+  e.useSound = true;
+  const curled = hand({ pose: 'pinch' });
+  const [wx, wy] = curled[0];
+  curled[12] = [wx, wy - 0.5 * 0.12];
+  curled[4] = [wx - (0.08 * 0.12) / ASPECT, wy - 0.55 * 0.12];
+  const ev = [];
+  ev.push(...e.update(0, [H(hand({ pose: 'pinch' }))], [], ASPECT));
+  ev.push(...e.update(50, [H(curled)], [], ASPECT));
+  ev.push(...e.onClick(60));
+  ev.push(...e.update(100, [H(hand({ pose: 'open' }))], [], ASPECT));
+  ev.push(...e.tick(1500));
+  assert.deepEqual(ev, [], 'a one-frame tracker glitch that looks like a slam is not a snap');
 }
 console.log('gesture tests passed');

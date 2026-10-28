@@ -52,7 +52,6 @@
       const T = DustEffect.TILE;
       const alpha = s.getImageData(0, 0, pw, ph).data;
       this.tiles = [];
-      this.vanishEnd = 0;
       for (let y = 0; y < ph; y += T) {
         for (let x = 0; x < pw; x += T) {
           const cx = Math.min(pw - 1, x + (T >> 1)), cy = Math.min(ph - 1, y + (T >> 1));
@@ -66,16 +65,16 @@
             wobble: rand(6, 18), phase: rand(0, Math.PI * 2),
             back: 0.1 + (1 - x / pw) * 0.5 + rand(0, 0.5),
           };
-          this.vanishEnd = Math.max(this.vanishEnd, tile.delay + tile.life);
           this.tiles.push(tile);
         }
       }
       this.returnAt = null;
     }
 
+    // Coming back starts right away, even while dust is still flying off.
     reappear(t) {
       if (this.returnAt !== null) return;
-      this.returnAt = Math.max(t, this.vanishEnd);
+      this.returnAt = t;
       this.returnEnd = 0;
       for (const p of this.tiles) this.returnEnd = Math.max(this.returnEnd, p.back + p.life * 0.55);
     }
@@ -102,7 +101,14 @@
         if (returning) {
           const life = p.life * 0.55;
           const left = life - (tr - p.back);
-          if (left >= life) continue;
+          if (left >= life) {
+            // Tiles that hadn't blown away yet stay put until they fly back.
+            if (this.returnAt < p.delay) {
+              ctx.globalAlpha = 1 - fade;
+              ctx.drawImage(this.snapshot, p.x, p.y, T, T, p.x * kx, p.y * ky, T * kx + 0.75, T * ky + 0.75);
+            }
+            continue;
+          }
           if (left <= 0) {
             ctx.globalAlpha = 1 - fade;
             ctx.drawImage(this.snapshot, p.x, p.y, T, T, p.x * kx, p.y * ky, T * kx + 0.75, T * ky + 0.75);

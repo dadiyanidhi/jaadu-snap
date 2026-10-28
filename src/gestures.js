@@ -32,10 +32,6 @@
     return extended >= 3 && lm[MIDDLE_TIP][1] < lm[WRIST][1];
   }
 
-  // Getting ready to snap: thumb on the middle finger, ring and pinky folded.
-  // A hand being raised or waved keeps them out, so it never arms a snap.
-  const ringAndPinkyFolded = (lm, aspect) => !isExtended(lm, FINGERS[2], aspect) && !isExtended(lm, FINGERS[3], aspect);
-
   class GestureEngine {
     constructor() {
       this.sensitivity = 0.5;
@@ -86,21 +82,35 @@
         const curl = dist(lm[MIDDLE_TIP], lm[WRIST], aspect) / scale;
         this.debug.push({ key, pinch, curl, touching: st.touching });
 
-        if (pinch < touchMax) {
-          // Only arming needs the full pose: mid-snap the tracker often loses the
-          // folded fingers for a frame.
-          st.touching ||= now - st.since > SETTLE_MS && ringAndPinkyFolded(lm, aspect);
+        // A slam only counts if the finger is still in the palm on the next
+        // frame: the tracker sometimes misreads a single frame.
+        if (st.slamAt != null) {
+          if (curl < 1.1) this.release(st.slamAt, events);
+          st.slamAt = null;
+        }
+
+        // The middle finger slamming into the palm is the clearest sign of a
+        // snap; motion blur often hides the thumb and finger separating.
+        const slammed = st.touching && curl < Math.min(1, st.touchCurl - 0.4);
+        if (pinch < touchMax && !slammed) {
+          st.touching = now - st.since > SETTLE_MS;
           st.touchAt = now;
-        } else if (st.touching && pinch > releaseMin) {
-          st.touching = false;
+          st.touchCurl = curl;
+        } else if (st.touching && (pinch > releaseMin || slammed)) {
           // After a real snap the middle finger lands in the palm; opening the
           // hand instead leaves it pointing up.
-          if (now - st.touchAt >= touchWindow || curl >= curlMax) continue;
-          if (this.useSound) {
-            this.onRelease((now + st.touchAt) / 2, events);
-          } else if (now - this.lastSnapAt > 220) {
-            this.lastSnapAt = now;
-            this.onSnap(now, events);
+          if (now - st.touchAt >= touchWindow || curl >= curlMax) {
+            st.touching = false;
+            continue;
+          }
+          if (slammed) {
+            st.slamAt = now;
+            // The tracker can see the slam a frame before the click, so with
+            // sound the hand stays armed and later slammed frames can match it.
+            if (!this.useSound) st.touching = false;
+          } else {
+            st.touching = false;
+            this.release((now + st.touchAt) / 2, events);
           }
         }
       }
@@ -116,6 +126,15 @@
       this.updateFacepalm(now, hands, aspect, events);
       this.tick(now, events);
       return events;
+    }
+
+    release(at, events) {
+      if (this.useSound) {
+        this.onRelease(at, events);
+      } else if (at - this.lastSnapAt > 220) {
+        this.lastSnapAt = at;
+        this.onSnap(at, events);
+      }
     }
 
     // With sound available, a snap is a sharp click from the mic within

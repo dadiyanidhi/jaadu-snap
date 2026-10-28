@@ -37,7 +37,7 @@ Works in Chrome and other Chromium browsers (Edge, Brave, Arc). It needs Chrome 
 
 Join a call with your camera on and keep the camera still for about 10 seconds while the extension loads hand tracking and learns your room. The popup says **Ready** when it's done.
 
-- **Snap:** raise your hand to face or chest height, palm toward the camera, press your thumb and middle finger together with your ring and pinky fingers folded, and snap. You turn to dust and stay gone. Snap again and the dust flies back together.
+- **Snap:** raise your hand to face or chest height, palm toward the camera, press your thumb and middle finger together, and snap. You turn to dust and stay gone. Snap again any time, even while the dust is still flying, and it flies back together.
 - **Double snap:** two snaps within about two-thirds of a second. A single snap waits that long before it fires, in case a second one is coming. If you turn off double snap, single snaps fire instantly.
 - **Absolute cinema:** both hands up at your sides, palms open, fingers up. Hold for half a second. It lasts as long as you hold the pose.
 - **Facepalm:** cover your face with an open palm for half a second.
@@ -49,8 +49,8 @@ Every effect has a **Test** button in the popup and a keyboard shortcut in the c
 A snap is too fast for the camera alone: the click happens between two video frames. So the extension listens to your mic for the snap's sharp click and only counts it if, at the same moment, the camera sees a real snap:
 
 - the hand has been in view for a moment (a hand coming into frame often looks pinched for a frame or two)
-- thumb on middle finger, ring and pinky folded
-- thumb and middle finger fly apart and the middle finger lands in the palm
+- thumb and middle finger were pressed together
+- the middle finger slams into the palm (or flies away from the thumb and lands there), and is still there a frame later
 
 Raising or waving a hand, typing, claps, beeps and holding a pen don't trigger it.
 
