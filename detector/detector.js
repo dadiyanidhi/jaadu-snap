@@ -1,9 +1,9 @@
-// Runs inside a hidden extension iframe on meet.google.com. Meet's page enforces
-// Trusted Types, which blocks MediaPipe's loader, so inference happens here in
-// the extension's own origin and only landmarks + a small mask go back.
+// Runs inside a hidden extension iframe on the call site. Pages like Meet
+// enforce Trusted Types, which blocks MediaPipe's loader, so inference happens
+// here in the extension's own origin and only landmarks + a small mask go back.
 import { FaceDetector, HandLandmarker, ImageSegmenter } from '../vendor/vision_bundle.mjs';
 
-const PARENT_ORIGIN = 'https://meet.google.com';
+const PARENT_ORIGIN = location.ancestorOrigins?.[0];
 const url = (path) => new URL(path, import.meta.url).href;
 const fileset = {
   wasmLoaderPath: url('../vendor/wasm/vision_wasm_internal.js'),
@@ -131,13 +131,13 @@ function inpaint(msg) {
 }
 
 async function init() {
-  if (!location.ancestorOrigins?.length || location.ancestorOrigins[0] !== PARENT_ORIGIN) return;
+  if (!PARENT_ORIGIN || !/^https:|^http:\/\/(localhost|127\.0\.0\.1)[:/]/.test(`${PARENT_ORIGIN}/`)) return;
   try {
     try {
       [hands, segmenter, faces] = await createAll('GPU');
       backend = 'GPU';
     } catch (gpuErr) {
-      console.warn('[Meet Snap FX] GPU delegate failed, using CPU', gpuErr);
+      console.warn('[Jaadu Snap] GPU delegate failed, using CPU', gpuErr);
       [hands, segmenter, faces] = await createAll('CPU');
       backend = 'CPU';
     }

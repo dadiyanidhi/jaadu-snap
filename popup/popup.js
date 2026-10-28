@@ -9,20 +9,18 @@ const DEFAULTS = {
   showDebug: false,
   cinemaText: 'ABSOLUTE CINEMA',
   facepalmText: 'bruh.',
-  facepalmImage: null,
 };
-const MAX_IMAGE_SIDE = 640;
 
 const $ = (sel) => document.querySelector(sel);
 const statusEl = $('#status');
 
-async function meetTab() {
+async function callTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  return tab?.url?.startsWith('https://meet.google.com/') ? tab : null;
+  return /^(https:|http:\/\/(localhost|127\.0\.0\.1)[:/])/.test(tab?.url || '') ? tab : null;
 }
 
-async function sendToMeet(msg) {
-  const tab = await meetTab();
+async function sendToTab(msg) {
+  const tab = await callTab();
   if (!tab) return null;
   try {
     return await chrome.tabs.sendMessage(tab.id, msg);
@@ -32,13 +30,13 @@ async function sendToMeet(msg) {
 }
 
 async function refreshStatus() {
-  const tab = await meetTab();
+  const tab = await callTab();
   if (!tab) {
-    setStatus('Open a Google Meet tab to use effects.');
+    setStatus('Open your video call (Meet, Teams, Zoom web…) to use effects.');
     return;
   }
-  const s = await sendToMeet({ type: 'getStatus' });
-  if (!s) setStatus('Reload the Meet tab to activate the extension.', 'err');
+  const s = await sendToTab({ type: 'getStatus' });
+  if (!s) setStatus('Reload this tab to activate the extension.', 'err');
   else if (!s.hooked) setStatus('Waiting for your camera to turn on…');
   else if (s.detector === 'error') setStatus(`Detector failed: ${s.error}`, 'err');
   else if (s.detector !== 'ready') setStatus('Camera hooked. Loading hand tracking…');
@@ -55,12 +53,6 @@ function setStatus(text, kind = '') {
   statusEl.className = `status ${kind}`;
 }
 
-function showPreview(src) {
-  const img = $('#preview');
-  img.hidden = !src;
-  if (src) img.src = src;
-}
-
 async function init() {
   const settings = await chrome.storage.local.get(DEFAULTS);
 
@@ -73,47 +65,20 @@ async function init() {
       chrome.storage.local.set({ [key]: value });
     });
   }
-  showPreview(settings.facepalmImage);
+  chrome.storage.local.remove('facepalmImage');
 
   for (const btn of document.querySelectorAll('[data-trigger]')) {
-    btn.addEventListener('click', () => sendToMeet({ type: 'trigger', name: btn.dataset.trigger }));
+    btn.addEventListener('click', () => sendToTab({ type: 'trigger', name: btn.dataset.trigger }));
   }
   for (const btn of document.querySelectorAll('[data-background]')) {
     btn.addEventListener('click', async () => {
-      await sendToMeet({ type: 'background', action: btn.dataset.background });
+      await sendToTab({ type: 'background', action: btn.dataset.background });
       if (btn.dataset.background === 'capture') setStatus('Step out of frame now: capturing in 3 s…', 'ok');
     });
   }
 
-  $('#facepalmImage').addEventListener('change', async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const dataUrl = await downscale(file);
-    await chrome.storage.local.set({ facepalmImage: dataUrl });
-    showPreview(dataUrl);
-  });
-  $('#clearImage').addEventListener('click', async () => {
-    await chrome.storage.local.set({ facepalmImage: null });
-    $('#facepalmImage').value = '';
-    showPreview(null);
-  });
-
   refreshStatus();
   setInterval(refreshStatus, 1500);
-}
-
-// Shrinks uploads so they fit comfortably in storage; keeps PNG transparency.
-async function downscale(file) {
-  const bmp = await createImageBitmap(file);
-  const k = Math.min(1, MAX_IMAGE_SIDE / Math.max(bmp.width, bmp.height));
-  const c = new OffscreenCanvas(Math.round(bmp.width * k), Math.round(bmp.height * k));
-  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
-  const blob = await c.convertToBlob({ type: 'image/png' });
-  return new Promise((resolve) => {
-    const r = new FileReader();
-    r.onload = () => resolve(r.result);
-    r.readAsDataURL(blob);
-  });
 }
 
 init();

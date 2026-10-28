@@ -1,15 +1,16 @@
-// Main-world script. Wraps getUserMedia so Meet receives a processed camera
-// track: every frame is redrawn with the active effect, and a downscaled copy is
-// sent to the detector iframe (MediaPipe + MI-GAN, running in the extension's
-// origin). Meet keeps several copies of the camera alive, so detection, the
-// person mask and the learned room are shared by all of them.
+// Main-world script. Wraps getUserMedia so the call site (Meet, Teams, Zoom,
+// …) receives a processed camera track: every frame is redrawn with the active
+// effect, and a downscaled copy is sent to the detector iframe (MediaPipe +
+// MI-GAN, running in the extension's origin). Sites like Meet keep several
+// copies of the camera alive, so detection, the person mask and the learned
+// room are shared by all of them.
 (() => {
   const NS = (window.__snapFX ||= {});
   if (NS.installed) return;
   NS.installed = true;
 
   if (!window.MediaDevices || !('MediaStreamTrackProcessor' in window) || !('MediaStreamTrackGenerator' in window)) {
-    console.warn('[Meet Snap FX] This browser lacks insertable streams; effects disabled.');
+    console.warn('[Jaadu Snap] This browser lacks insertable streams; effects disabled.');
     return;
   }
 
@@ -23,13 +24,12 @@
 
   NS.settings = {
     enabled: true, snap: true, doubleSnap: true, cinema: true, facepalm: true, snapSound: true,
-    sensitivity: 0.5, showDebug: false, cinemaText: 'ABSOLUTE CINEMA', facepalmText: 'bruh.', facepalmImage: null,
+    sensitivity: 0.5, showDebug: false, cinemaText: 'ABSOLUTE CINEMA', facepalmText: 'bruh.',
   };
   const status = { hooked: false, detector: 'idle', backend: null, error: null, room: 'idle', sound: 'off' };
   const fx = new NS.FXManager();
   const gestures = new NS.GestureEngine();
   const pipelines = new Set();
-  let facepalmImageSrc = null;
 
   const post = (msg) => window.postMessage({ snapfx: true, ...msg }, location.origin);
   const reportStatus = () => post({ type: 'status', status: { ...status } });
@@ -156,7 +156,7 @@
     detector.request('inpaint', { width: rw, height: rh, data: image.data.buffer }, [image.data.buffer], 60000).then((res) => {
       inpaintInFlight = false;
       if (!res || res.error) {
-        if (res?.error) console.warn('[Meet Snap FX] inpainting failed', res.error);
+        if (res?.error) console.warn('[Jaadu Snap] inpainting failed', res.error);
         target.inpaintedAt = performance.now();
         if (target === scene && status.room !== 'ready') setStatus({ room: res?.error ? 'unavailable' : status.room });
         return;
@@ -301,6 +301,13 @@
       if (this.stream || this.starting || !NS.settings.snapSound) return;
       this.starting = true;
       try {
+        // Never be the reason a site asks for the mic: only listen where the
+        // call already has mic access.
+        const mic = await navigator.permissions.query({ name: 'microphone' }).catch(() => null);
+        if (mic?.state !== 'granted') {
+          setStatus({ sound: 'unavailable' });
+          return;
+        }
         const stream = await originalGUM.call(navigator.mediaDevices, {
           audio: {
             ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
@@ -324,7 +331,7 @@
         gestures.useSound = true;
         setStatus({ sound: 'on' });
       } catch (err) {
-        console.warn('[Meet Snap FX] snap sound unavailable, using camera only', err);
+        console.warn('[Jaadu Snap] snap sound unavailable, using camera only', err);
         setStatus({ sound: 'unavailable' });
       } finally {
         this.starting = false;
@@ -386,17 +393,6 @@
     if (!NS.settings.enabled) fx.active = null;
     if (!NS.settings.snapSound && sound.stream) sound.stop();
     if (NS.settings.snapSound && pipelines.size && !sound.stream) sound.start(lastAudioDevice);
-    if (NS.settings.facepalmImage !== facepalmImageSrc) {
-      facepalmImageSrc = NS.settings.facepalmImage;
-      fx.assets.facepalm = null;
-      if (facepalmImageSrc) {
-        const img = new Image();
-        img.onload = () => createImageBitmap(img).then((bmp) => {
-          if (facepalmImageSrc === NS.settings.facepalmImage) fx.assets.facepalm = bmp;
-        });
-        img.src = facepalmImageSrc;
-      }
-    }
   }
 
   function manual(name) {
@@ -522,7 +518,7 @@
         frame.close();
         controller.enqueue(out);
       } catch (err) {
-        console.warn('[Meet Snap FX] frame error', err);
+        console.warn('[Jaadu Snap] frame error', err);
         controller.enqueue(frame);
       }
     }
@@ -562,13 +558,17 @@
     const [video] = stream.getVideoTracks();
     const [audio] = stream.getAudioTracks();
     if (audio) lastAudioDevice = audio.getSettings().deviceId || lastAudioDevice;
-    if (!constraints?.video || !video) return stream;
+    if (!constraints?.video || !video) {
+      // The call may get mic access after the camera is already running.
+      if (audio && pipelines.size) sound.start(lastAudioDevice);
+      return stream;
+    }
     try {
       const pipeline = new Pipeline(video);
       sound.start(lastAudioDevice);
       return new MediaStream([pipeline.out, ...stream.getAudioTracks()]);
     } catch (err) {
-      console.warn('[Meet Snap FX] could not wrap camera', err);
+      console.warn('[Jaadu Snap] could not wrap camera', err);
       return stream;
     }
   };

@@ -1,30 +1,64 @@
 {
   "manifest_version": 3,
-  "name": "Meet Snap FX",
-  "version": "1.1.0",
-  "description": "Gesture-triggered live effects for Google Meet: snap to turn to dust, double snap for cash rain, hands up for absolute cinema, facepalm for… you know.",
-  "icons": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
-  "action": { "default_popup": "popup/popup.html", "default_icon": { "16": "icons/icon16.png", "48": "icons/icon48.png" } },
-  "permissions": ["storage"],
+  "name": "Jaadu Snap",
+  "version": "1.2.0",
+  "description": "Magic gestures for video calls: snap to vanish into dust, double snap for cash rain, hands up for absolute cinema, facepalm for a rain cloud. Works in Meet, Teams, Zoom and any web call.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png"
+    }
+  },
+  "permissions": [
+    "storage"
+  ],
   "content_scripts": [
     {
-      "matches": ["https://meet.google.com/*"],
-      "js": ["src/bridge.js"],
+      "matches": [
+        "https://*/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": [
+        "src/bridge.js"
+      ],
       "run_at": "document_start",
-      "all_frames": false
+      "all_frames": true
     },
     {
-      "matches": ["https://meet.google.com/*"],
-      "js": ["src/gestures.js", "src/effects.js", "src/camera.js"],
+      "matches": [
+        "https://*/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": [
+        "src/gestures.js",
+        "src/effects.js",
+        "src/camera.js"
+      ],
       "run_at": "document_start",
       "world": "MAIN",
-      "all_frames": false
+      "all_frames": true
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["detector/*", "vendor/*", "models/*"],
-      "matches": ["https://meet.google.com/*"]
+      "resources": [
+        "detector/*",
+        "vendor/*",
+        "models/*"
+      ],
+      "matches": [
+        "https://*/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ]
     }
   ],
   "content_security_policy": {

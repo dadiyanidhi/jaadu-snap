@@ -300,57 +300,107 @@
     }
   }
 
-  // Facepalm: dramatic zoom on your face and… someone shows up.
-  class FacepalmEffect {
-    static DURATION = 4.6;
+  // Facepalm: the room goes gloomy, thunder flashes, and a storm cloud parks
+  // over your head and rains on you.
+  class RainEffect {
+    static DURATION = 5;
 
     start(scene) {
       const f = scene.faceBox;
       this.cx = f ? f.x + f.w / 2 : 0.5;
-      this.cy = f ? f.y + f.h / 2 : 0.4;
+      this.top = f ? f.y - f.h * 0.4 : 0.15;
+      this.width = Math.min(0.4, Math.max(0.2, f ? f.w * 1.8 : 0.3));
+      // Puffs in cloud-width units around a flat bottom at y = 0.
+      this.puffs = Array.from({ length: 7 }, (_, i) => {
+        const hump = Math.sin((i / 6) * Math.PI);
+        const r = 0.11 + hump * 0.09 + rand(-0.015, 0.015);
+        return { x: (i / 6 - 0.5) * 0.78, y: -r * (0.55 + hump * 0.5), r };
+      });
+      // Heavy rain under the cloud, a lighter drizzle across the whole frame.
+      this.drops = Array.from({ length: 260 }, (_, i) => ({
+        under: i < 140,
+        x: rand(), y: rand(),
+        speed: rand(1.3, 1.9), len: rand(0.03, 0.06),
+      }));
     }
 
-    draw(ctx, frame, W, H, t, scene, settings, assets) {
-      const D = FacepalmEffect.DURATION;
-      const inP = easeOut(t / 0.5);
-      const outP = clamp01((D - t) / 0.5);
-      const p = Math.min(inP, outP);
+    intensity(t) {
+      return Math.min(easeOut(t / 0.5), clamp01((RainEffect.DURATION - t) / 0.6));
+    }
 
-      const z = 1 + 0.22 * p;
-      const sw = W / z, sh = H / z;
-      const sx = Math.max(0, Math.min(W - sw, this.cx * W - sw / 2));
-      const sy = Math.max(0, Math.min(H - sh, this.cy * H - sh / 2));
-      ctx.filter = `saturate(${1 - 0.4 * p}) contrast(${1 + 0.1 * p})`;
-      ctx.drawImage(frame, sx, sy, sw, sh, 0, 0, W, H);
-      ctx.filter = 'none';
+    filter(t) {
+      const p = this.intensity(t);
+      return `saturate(${1 - 0.6 * p}) brightness(${1 - 0.25 * p}) contrast(${1 + 0.08 * p})`;
+    }
 
-      const enter = easeOut((t - 0.25) / 0.55);
-      const leave = clamp01((D - 0.15 - t) / 0.45);
-      const show = Math.min(enter, leave);
-      if (show > 0) {
-        const wob = Math.sin(t * 7) * 0.04;
-        if (assets.facepalm) {
-          const img = assets.facepalm;
-          const h = H * 0.62, w = h * (img.width / img.height);
-          ctx.save();
-          ctx.translate(W - w * 0.55 - W * 0.02, H - h * show + h * 0.5);
-          ctx.rotate(wob * 0.5);
-          ctx.drawImage(img, -w / 2, -h / 2, w, h);
-          ctx.restore();
-        } else {
-          const size = H * 0.42;
-          ctx.save();
-          ctx.translate(W - size * 0.6, H + size * 0.55 - size * 1.05 * show);
-          ctx.rotate(wob - 0.12);
-          ctx.font = `${size}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText('🤦', 0, 0);
-          ctx.restore();
-        }
+    draw(ctx, frame, W, H, t, scene, settings) {
+      const p = this.intensity(t);
+      const f = scene.faceBox;
+      if (f) {
+        this.cx += (f.x + f.w / 2 - this.cx) * 0.12;
+        this.top += (f.y - f.h * 0.4 - this.top) * 0.12;
       }
 
-      const capP = clamp01((t - 0.6) / 0.25) * outP;
+      ctx.fillStyle = `rgba(30, 45, 70, ${0.28 * p})`;
+      ctx.fillRect(0, 0, W, H);
+
+      const cw = this.width * W;
+      const cx = this.cx * W;
+      const drop = easeOut((t - 0.15) / 0.7);
+      // cy is the cloud's bottom: just above the head, or at least peeking in
+      // from the top edge when the head fills the frame.
+      const cy = Math.max(cw * 0.12, this.top * H - cw * 0.04) - (1 - drop) * H * 0.6 + Math.sin(t * 1.7) * H * 0.006;
+
+      const angle = 0.12;
+      ctx.lineCap = 'round';
+      for (const d of this.drops) {
+        if (d.under && drop < 0.9) continue;
+        const travel = (d.y + t * d.speed) % 1;
+        let x, y0, span;
+        if (d.under) {
+          x = cx + (d.x - 0.5) * cw * 0.85;
+          y0 = cy;
+          span = H - y0;
+        } else {
+          x = d.x * W;
+          y0 = 0;
+          span = H;
+        }
+        const y = y0 + travel * span;
+        const len = d.len * H;
+        ctx.strokeStyle = `rgba(200, 220, 255, ${(d.under ? 0.75 : 0.35) * p})`;
+        ctx.lineWidth = Math.max(1, W * (d.under ? 0.0028 : 0.0018));
+        ctx.beginPath();
+        ctx.moveTo(x - len * angle, y - len);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+      }
+
+      if (drop > 0) {
+        ctx.save();
+        ctx.globalAlpha = p;
+        const shade = ctx.createLinearGradient(0, cy - cw * 0.4, 0, cy);
+        shade.addColorStop(0, '#6b7180');
+        shade.addColorStop(1, '#2c303a');
+        ctx.fillStyle = shade;
+        ctx.beginPath();
+        for (const puff of this.puffs) {
+          const px = cx + puff.x * cw, py = cy + puff.y * cw, r = puff.r * cw;
+          ctx.moveTo(px + r, py);
+          ctx.arc(px, py, r, 0, Math.PI * 2);
+        }
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // One thunder flash as the cloud arrives.
+      const flash = Math.max(0, 1 - Math.abs(t - 0.85) / 0.12) + Math.max(0, 1 - Math.abs(t - 1.1) / 0.08) * 0.6;
+      if (flash > 0) {
+        ctx.fillStyle = `rgba(235, 240, 255, ${0.55 * flash * p})`;
+        ctx.fillRect(0, 0, W, H);
+      }
+
+      const capP = clamp01((t - 0.9) / 0.25) * clamp01((RainEffect.DURATION - t) / 0.5);
       if (capP > 0 && settings.facepalmText) {
         const size = Math.round(H * 0.1);
         ctx.save();
@@ -362,20 +412,19 @@
         ctx.strokeStyle = '#000';
         ctx.fillStyle = '#fff';
         const y = H - H * 0.07;
-        ctx.strokeText(settings.facepalmText, W * 0.42, y);
-        ctx.fillText(settings.facepalmText, W * 0.42, y);
+        ctx.strokeText(settings.facepalmText, W / 2, y);
+        ctx.fillText(settings.facepalmText, W / 2, y);
         ctx.restore();
       }
-      return t < D;
+      return t < RainEffect.DURATION;
     }
   }
 
-  const EFFECTS = { dust: DustEffect, cash: CashEffect, cinema: CinemaEffect, facepalm: FacepalmEffect };
+  const EFFECTS = { dust: DustEffect, cash: CashEffect, cinema: CinemaEffect, facepalm: RainEffect };
 
   class FXManager {
     constructor() {
       this.active = null;
-      this.assets = { facepalm: null };
     }
 
     // Returns false if the effect couldn't start (e.g. no person mask yet).
@@ -410,7 +459,7 @@
     draw(ctx, frame, W, H, now, scene, settings) {
       const a = this.active;
       if (!a) return;
-      const alive = a.fx.draw(ctx, frame, W, H, now - a.startedAt, scene, settings, this.assets);
+      const alive = a.fx.draw(ctx, frame, W, H, now - a.startedAt, scene, settings);
       ctx.globalAlpha = 1;
       ctx.filter = 'none';
       ctx.globalCompositeOperation = 'source-over';

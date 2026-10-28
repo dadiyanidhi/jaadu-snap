@@ -9,6 +9,8 @@
   const PALM = [0, 5, 9, 13, 17];
 
   const SOUND_SYNC_MS = 400;
+  // A hand coming into view often shows a fake pinch for a frame or two.
+  const SETTLE_MS = 300;
 
   const dist = (a, b, aspect) => Math.hypot((a[0] - b[0]) * aspect, a[1] - b[1]);
 
@@ -23,13 +25,16 @@
     return x > box.x - px && x < box.x + box.w + px && y > box.y - py && y < box.y + box.h + py;
   }
 
+  const isExtended = (lm, [tip, pip], aspect) => dist(lm[tip], lm[WRIST], aspect) > dist(lm[pip], lm[WRIST], aspect) * 1.1;
+
   function isOpenUp(lm, aspect) {
-    let extended = 0;
-    for (const [tip, pip] of FINGERS) {
-      if (dist(lm[tip], lm[WRIST], aspect) > dist(lm[pip], lm[WRIST], aspect) * 1.1) extended++;
-    }
+    const extended = FINGERS.filter((f) => isExtended(lm, f, aspect)).length;
     return extended >= 3 && lm[MIDDLE_TIP][1] < lm[WRIST][1];
   }
+
+  // Getting ready to snap: thumb on the middle finger, ring and pinky folded.
+  // A hand being raised or waved keeps them out, so it never arms a snap.
+  const ringAndPinkyFolded = (lm, aspect) => !isExtended(lm, FINGERS[2], aspect) && !isExtended(lm, FINGERS[3], aspect);
 
   class GestureEngine {
     constructor() {
@@ -71,7 +76,7 @@
         const lm = hand.landmarks;
         const key = hand.handedness;
         seen.add(key);
-        const st = this.hands.get(key) || { touching: false, touchAt: -Infinity };
+        const st = this.hands.get(key) || { touching: false, touchAt: -Infinity, since: now };
         st.seenAt = now;
         this.hands.set(key, st);
 
@@ -82,13 +87,18 @@
         this.debug.push({ key, pinch, curl, touching: st.touching });
 
         if (pinch < touchMax) {
-          st.touching = true;
+          // Only arming needs the full pose: mid-snap the tracker often loses the
+          // folded fingers for a frame.
+          st.touching ||= now - st.since > SETTLE_MS && ringAndPinkyFolded(lm, aspect);
           st.touchAt = now;
         } else if (st.touching && pinch > releaseMin) {
           st.touching = false;
+          // After a real snap the middle finger lands in the palm; opening the
+          // hand instead leaves it pointing up.
+          if (now - st.touchAt >= touchWindow || curl >= curlMax) continue;
           if (this.useSound) {
-            if (now - st.touchAt < touchWindow) this.onRelease((now + st.touchAt) / 2, events);
-          } else if (now - st.touchAt < touchWindow && curl < curlMax && now - this.lastSnapAt > 220) {
+            this.onRelease((now + st.touchAt) / 2, events);
+          } else if (now - this.lastSnapAt > 220) {
             this.lastSnapAt = now;
             this.onSnap(now, events);
           }
@@ -96,11 +106,9 @@
       }
       for (const [key, st] of this.hands) {
         if (seen.has(key)) continue;
-        // A snapping hand often blurs out of detection mid-snap.
-        if (st.touching && now - st.touchAt < touchWindow) {
-          st.touching = false;
-          if (this.useSound) this.onRelease(st.touchAt, events);
-        }
+        // A snapping hand often blurs out of detection for a few frames. It
+        // stays armed and is judged by its pose when it comes back, since a
+        // hand simply leaving the frame looks the same while it's gone.
         if (now - st.seenAt > 1000) this.hands.delete(key);
       }
 

@@ -12,7 +12,6 @@
     showDebug: false,
     cinemaText: 'ABSOLUTE CINEMA',
     facepalmText: 'bruh.',
-    facepalmImage: null,
   };
 
   document.documentElement.dataset.snapfxBase = chrome.runtime.getURL('');
@@ -36,9 +35,16 @@
     if (area === 'local') pushSettings();
   });
 
+  // The popup messages every frame in the tab; the frame whose camera is
+  // hooked answers, otherwise the top frame does after a moment.
   chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
-    if (msg?.type === 'getStatus') reply(status);
-    else if (msg?.type === 'trigger' || msg?.type === 'background') {
+    if (msg?.type === 'getStatus') {
+      if (status.hooked) reply(status);
+      else if (window === top) {
+        setTimeout(() => reply(status), 150);
+        return true;
+      }
+    } else if (msg?.type === 'trigger' || msg?.type === 'background') {
       toPage(msg);
       reply({ ok: true });
     }
